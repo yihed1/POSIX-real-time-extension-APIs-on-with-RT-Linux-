@@ -1,0 +1,269 @@
+#include <pthread.h>
+#include <sys/mman.h>  // necessary for mlockall
+#include <sys/time.h>
+
+#include <cstring>
+#include <stdexcept>
+#include <string>
+
+#include <chrono>
+#include "p3_util.h"
+#include <ctime>
+
+//#define SET_CPU True
+clock_t beginRT, beginNRT, endRT, endNRT;
+double time_elapsedRT, time_elapsedNRT;
+
+bool SET_CPU = false;
+void LockMemory() {
+    int ret = mlockall(MCL_CURRENT | MCL_FUTURE);
+    if (ret) {
+        throw std::runtime_error{std::string("mlockall failed: ") + std::strerror(errno)};
+    }
+}
+
+void setCPU(int cpu_id = 1) {
+    // Set CPU affinity
+    /* Your Code */
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(cpu_id, &cpuset);
+    pthread_t current_thread = pthread_self();
+    int ret = pthread_setaffinity_np(current_thread, sizeof(cpuset), &cpuset);
+}
+
+class ThreadRT {
+    int priority_;
+    int policy_;
+
+    pthread_t thread_;
+
+    static void* RunThreadRT(void* data) {
+    if (SET_CPU)
+        setCPU(1);
+        printf("[RT thread #%lu] running on CPU #%d\n", pthread_self(), sched_getcpu());
+
+        ThreadRT* thread = static_cast<ThreadRT*>(data);
+        thread->Run();
+        return NULL;
+    }
+
+public:
+    int app_id_;
+    ThreadRT(int app_id, int priority, int policy) : app_id_(app_id), priority_(priority), policy_(policy) {}
+
+    void Start() {
+        sched_param param;
+        param.sched_priority = priority_;
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+
+        pthread_attr_setschedpolicy(&attr, policy_);
+
+        pthread_attr_setschedparam(&attr, &param);
+        
+
+        pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+
+
+        beginRT = clock();
+
+        int n = pthread_create(&thread_, &attr, &ThreadRT::RunThreadRT, this);
+        
+        printf("%d\n",n);
+    }
+
+    void Join() {
+        // Join the thread
+        /* Your Code */
+        int joinResult = pthread_join(thread_, NULL);
+        
+        printf("[RT thread #%lu] App #%d Ends\n", thread_, app_id_);
+
+        
+    }
+
+    virtual void Run() = 0;
+};
+
+class ThreadNRT {
+    pthread_t thread_;
+
+    static void* RunThreadNRT(void* data) {
+    if (SET_CPU)
+        setCPU(1);
+        printf("[NRT thread #%lu] running on CPU #%d\n", pthread_self(), sched_getcpu());
+
+        ThreadNRT* thread = static_cast<ThreadNRT*>(data);
+        thread->Run();
+        return NULL;
+    }
+
+public:
+    int app_id_;
+
+    ThreadNRT(int app_id) : app_id_(app_id) {}
+
+    void Start() {
+        
+        // Start the timer
+        /* Your Code */
+        beginNRT = clock();
+        // Create the pthread
+        pthread_create(&thread_, NULL, &ThreadNRT::RunThreadNRT, this);
+    }
+
+    void Join() {
+        // Join the thread
+        pthread_join(thread_, NULL);
+        printf("[NRT thread #%lu] App #%d Ends\n", thread_, app_id_);
+    }
+
+    virtual void Run() = 0;
+};
+
+class AppTypeX : public ThreadRT {
+public:
+    AppTypeX(int app_id, int priority, int policy) : ThreadRT(app_id, priority, policy) {}
+    void Run() {
+        // Code here to run the Application, e.g. CannyP3(), BusyCal(), your-func(), etc.
+        if (app_id_ == 1)
+        {
+            CannyP3();
+            // End the timer
+            endRT = clock();
+            time_elapsedRT = (double) (endRT - beginRT) / CLOCKS_PER_SEC;
+            printf("Elapsedtime for App #%d is %lf seconds\n", app_id_,time_elapsedRT);
+        }
+        else if (app_id_ == 3)
+        {
+            BusyCal();
+            // End the timer
+            endRT = clock();
+            time_elapsedRT = (double) (endRT - beginRT) / CLOCKS_PER_SEC;
+            printf("Elapsedtime for App #%d is %lf seconds\n", app_id_,time_elapsedRT);
+        }
+        else if (app_id_ == 5)
+        {
+            BusyCal();
+            // End the timer
+            endRT = clock();
+            time_elapsedRT = (double) (endRT - beginRT) / CLOCKS_PER_SEC;
+            printf("Elapsedtime for App #%d is %lf seconds\n", app_id_,time_elapsedRT);
+        }
+        
+        printf("Running App #%d...\n", app_id_);
+        
+    }
+};
+
+class AppTypeY : public ThreadNRT {
+public:
+    AppTypeY(int app_id) : ThreadNRT(app_id) {}
+    void Run() {
+        // Code here to run the Application, e.g. CannyP3(), BusyCal(), your-func(), etc.
+        //writecode
+        
+        if (app_id_ == 2)
+        {
+            BusyCal();
+            // End the timer
+            /* Your Code */
+            endNRT = clock();
+            time_elapsedNRT = (double) (endNRT - beginNRT) / CLOCKS_PER_SEC;
+            printf("Elapsedtime for App #%d is %lf seconds\n", app_id_,time_elapsedNRT);
+        }
+        else if (app_id_ == 4)
+        {
+            BusyCal();
+            endNRT = clock();
+            time_elapsedNRT = (double) (endNRT - beginNRT) / CLOCKS_PER_SEC;
+            printf("Elapsedtime for App #%d is %lf seconds\n", app_id_,time_elapsedNRT);
+        }
+        
+        
+        printf("Running App #%d...\n", app_id_);
+
+    }
+};
+
+int main(int argc, char** argv) {
+    int exp_id = 0;
+    if (argc < 2) {
+        fprintf(stderr, "WARNING: default exp_id=0\n", argv[0]);
+    } else {
+        exp_id = atoi(argv[1]);
+    }
+
+    LockMemory();
+
+    if (exp_id == 1) {
+        SET_CPU = true;
+        AppTypeX app1(1, 80, SCHED_FIFO);
+        AppTypeY app2(2);
+        AppTypeY app4(4);
+        
+
+        app1.Start();
+        app2.Start();
+        app4.Start();
+
+        app1.Join();
+        app2.Join();
+        app4.Join();
+    } else if (exp_id == 2){
+        SET_CPU = false;
+        AppTypeX app1(1, 80, SCHED_FIFO);
+        AppTypeY app2(2);
+        AppTypeY app4(4);
+        
+
+        app1.Start();
+        app2.Start();
+        app4.Start();
+
+        app1.Join();
+        app2.Join();
+        app4.Join();
+    } else if (exp_id == 3){
+        SET_CPU = true;
+        AppTypeX app3(3, 80, SCHED_FIFO);
+        AppTypeX app5(5, 80, SCHED_FIFO);
+        AppTypeY app4(4);
+        
+        app3.Start();
+        app5.Start();
+        app4.Start();
+
+        app3.Join();
+        app5.Join();
+        app4.Join();
+    } else if (exp_id == 4){
+        SET_CPU = true;
+        AppTypeX app3(3, 80, SCHED_RR);
+        AppTypeX app5(5, 80, SCHED_RR);
+        AppTypeY app4(4);
+        
+        app3.Start();
+        app5.Start();
+        app4.Start();
+
+        app3.Join();
+        app5.Join();
+        app4.Join();
+    } else if (exp_id == 5){
+        SET_CPU = false;
+        AppTypeX app3(3, 80, SCHED_FIFO);
+        AppTypeX app5(5, 80, SCHED_FIFO);
+        AppTypeY app4(4);
+        
+        app3.Start();
+        app5.Start();
+        app4.Start();
+
+        app3.Join();
+        app5.Join();
+        app4.Join();
+    }
+    return 0;
+}
